@@ -34,7 +34,10 @@ router.post("/", verifyToken, verifyCustomer, async (req, res) => {
       return res.status(400).send({ message: "Invalid service ID" });
     }
 
-    if (problemDescription.trim().length < 20) {
+    if (
+      typeof problemDescription !== "string" ||
+      problemDescription.trim().length < 20
+    ) {
       return res.status(400).send({
         message: "Problem description must be at least 20 characters"
       });
@@ -58,6 +61,12 @@ router.post("/", verifyToken, verifyCustomer, async (req, res) => {
 
     if (service === null) {
       return res.status(404).send({ message: "Service not found" });
+    }
+
+    if (service.technicianEmail === req.user.email) {
+      return res.status(400).send({
+        message: "You cannot book your own service"
+      });
     }
 
     const activeBooking = await bookingsCollection.findOne({
@@ -87,6 +96,13 @@ router.post("/", verifyToken, verifyCustomer, async (req, res) => {
       preferredDate: selectedDate,
       problemDescription,
       status: "requested",
+      statusHistory: [
+        {
+          status: "requested",
+          date: new Date(),
+          note: "Booking request submitted"
+        }
+      ],
       finalAmount: service.basePrice,
       paymentStatus: "unpaid",
       createdAt: new Date()
@@ -126,7 +142,17 @@ router.patch("/:id/cancel", verifyToken, verifyCustomer, async (req, res) => {
         status: "requested"
       },
       {
-        $set: { status: "cancelled" }
+        $set: {
+          status: "cancelled",
+          updatedAt: new Date()
+        },
+        $push: {
+          statusHistory: {
+            status: "cancelled",
+            date: new Date(),
+            note: "Booking cancelled by customer"
+          }
+        }
       }
     );
 
@@ -178,7 +204,10 @@ router.patch("/:id/status", verifyToken, verifyTechnician, async (req, res) => {
       "in-progress": ["completed"]
     };
 
-    if (allowedStatuses[booking.status]?.includes(status) === false) {
+    if (
+      allowedStatuses[booking.status] === undefined ||
+      allowedStatuses[booking.status].includes(status) === false
+    ) {
       return res.status(400).send({
         message: "Invalid booking status change"
       });
@@ -191,8 +220,8 @@ router.patch("/:id/status", verifyToken, verifyTechnician, async (req, res) => {
 
     if (status === "completed") {
       if (
-        Number(finalAmount) <= 0 ||
-        Number.isFinite(Number(finalAmount)) === false
+        Number.isFinite(Number(finalAmount)) === false ||
+        Number(finalAmount) <= 0
       ) {
         return res.status(400).send({
           message: "Enter a valid final amount"
@@ -203,8 +232,21 @@ router.patch("/:id/status", verifyToken, verifyTechnician, async (req, res) => {
     }
 
     await bookingsCollection.updateOne(
-      { _id: new ObjectId(req.params.id) },
-      { $set: updateData }
+      {
+        _id: new ObjectId(req.params.id),
+        technicianEmail: req.user.email,
+        status: booking.status
+      },
+      {
+        $set: updateData,
+        $push: {
+          statusHistory: {
+            status,
+            date: new Date(),
+            note: `Booking status changed to ${status}`
+          }
+        }
+      }
     );
 
     res.send({ message: "Booking status updated successfully" });
