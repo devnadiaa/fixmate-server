@@ -8,6 +8,8 @@ import verifyCustomer from "./middlewares/verifyCustomer.js";
 import verifyTechnician from "./middlewares/verifyTechnician.js";
 import verifyAdmin from "./middlewares/verifyAdmin.js";
 import serviceRoutes from "./serviceRoutes.js";
+import bookingRoutes from "./bookingRoutes.js";
+import adminRoutes from "./adminRoutes.js";
 
 dotenv.config();
 
@@ -29,6 +31,8 @@ app.get("/", (req, res) => {
 });
 
 app.use("/api/services", serviceRoutes);
+app.use("/api/bookings", bookingRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.get("/api/customer", verifyToken, verifyCustomer, (req, res) => {
   res.send({ message: "Welcome Customer", user: req.user });
@@ -38,7 +42,7 @@ app.get("/api/technician", verifyToken, verifyTechnician, (req, res) => {
   res.send({ message: "Welcome Technician", user: req.user });
 });
 
-app.get("/api/admin", verifyToken, verifyAdmin, (req, res) => {
+app.get("/api/admin-check", verifyToken, verifyAdmin, (req, res) => {
   res.send({ message: "Welcome Admin", user: req.user });
 });
 
