@@ -10,6 +10,7 @@ import verifyAdmin from "./middlewares/verifyAdmin.js";
 import serviceRoutes from "./serviceRoutes.js";
 import bookingRoutes from "./bookingRoutes.js";
 import adminRoutes from "./adminRoutes.js";
+import paymentRoutes from "./paymentRoutes.js";
 
 dotenv.config();
 
@@ -33,6 +34,7 @@ app.get("/", (req, res) => {
 app.use("/api/services", serviceRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/payments", paymentRoutes);
 
 app.get("/api/customer", verifyToken, verifyCustomer, (req, res) => {
   res.send({ message: "Welcome Customer", user: req.user });
