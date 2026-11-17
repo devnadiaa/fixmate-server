@@ -7,6 +7,7 @@ import verifyToken from "./middlewares/verifyToken.js";
 import verifyCustomer from "./middlewares/verifyCustomer.js";
 import verifyTechnician from "./middlewares/verifyTechnician.js";
 import verifyAdmin from "./middlewares/verifyAdmin.js";
+import serviceRoutes from "./serviceRoutes.js";
 
 dotenv.config();
 
@@ -26,6 +27,8 @@ app.use(express.json());
 app.get("/", (req, res) => {
   res.send("FixMate Server is Running");
 });
+
+app.use("/api/services", serviceRoutes);
 
 app.get("/api/customer", verifyToken, verifyCustomer, (req, res) => {
   res.send({ message: "Welcome Customer", user: req.user });
