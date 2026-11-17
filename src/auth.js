@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { betterAuth } from "better-auth";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
+import { jwt } from "better-auth/plugins";
 import { MongoClient } from "mongodb";
 
 const client = new MongoClient(process.env.MONGODB_URI);
@@ -32,7 +33,9 @@ const auth = betterAuth({
         input: false
       }
     }
-  }
+  },
+
+  plugins: [jwt()]
 });
 
 export { auth, client, db };
