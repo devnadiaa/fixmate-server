@@ -36,7 +36,7 @@ app.use("/api/services", serviceRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/payments", paymentRoutes);
-app.use("/api/profile", profileRoutes);
+app.use("/api/users/profile", profileRoutes);
 
 app.get("/api/customer", verifyToken, verifyCustomer, (req, res) => {
   res.send({ message: "Welcome Customer", user: req.user });
