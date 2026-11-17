@@ -3,6 +3,10 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { toNodeHandler } from "better-auth/node";
 import { auth, client } from "./auth.js";
+import verifyToken from "./middlewares/verifyToken.js";
+import verifyCustomer from "./middlewares/verifyCustomer.js";
+import verifyTechnician from "./middlewares/verifyTechnician.js";
+import verifyAdmin from "./middlewares/verifyAdmin.js";
 
 dotenv.config();
 
@@ -21,6 +25,18 @@ app.use(express.json());
 
 app.get("/", (req, res) => {
   res.send("FixMate Server is Running");
+});
+
+app.get("/api/customer", verifyToken, verifyCustomer, (req, res) => {
+  res.send({ message: "Welcome Customer", user: req.user });
+});
+
+app.get("/api/technician", verifyToken, verifyTechnician, (req, res) => {
+  res.send({ message: "Welcome Technician", user: req.user });
+});
+
+app.get("/api/admin", verifyToken, verifyAdmin, (req, res) => {
+  res.send({ message: "Welcome Admin", user: req.user });
 });
 
 async function run() {
