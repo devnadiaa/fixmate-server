@@ -16,11 +16,12 @@ const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL,
 
   trustedOrigins: [
-    process.env.CLIENT_URL || "http://localhost:3000"
+    process.env.CLIENT_URL || "http://localhost:3000",
   ],
 
   emailAndPassword: {
-    enabled: true
+    enabled: true,
+    autoSignIn: false,
   },
 
   user: {
@@ -30,24 +31,44 @@ const auth = betterAuth({
         type: "string",
         required: false,
         defaultValue: "customer",
-        input: false
+        input: true,
       },
       phone: {
         type: "string",
-        required: false
+        required: false,
       },
       area: {
         type: "string",
-        required: false
+        required: false,
       },
       bio: {
         type: "string",
-        required: false
-      }
-    }
+        required: false,
+      },
+    },
   },
 
-  plugins: [jwt()]
+  databaseHooks: {
+    user: {
+      create: {
+        before: async (user) => {
+          const role =
+            user.role === "technician" || user.role === "customer"
+              ? user.role
+              : "customer";
+
+          return {
+            data: {
+              ...user,
+              role,
+            },
+          };
+        },
+      },
+    },
+  },
+
+  plugins: [jwt()],
 });
 
 export { auth, client, db };

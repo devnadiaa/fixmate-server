@@ -7,6 +7,7 @@ import verifyTechnician from "./middlewares/verifyTechnician.js";
 const router = express.Router();
 
 const servicesCollection = db.collection("services");
+const usersCollection = db.collection("users");
 
 router.get("/", async (req, res) => {
   try {
@@ -90,7 +91,30 @@ router.get("/:id", async (req, res) => {
       return res.status(404).send({ message: "Service not found" });
     }
 
-    res.send(service);
+    const technician = await usersCollection.findOne(
+      { email: service.technicianEmail },
+      {
+        projection: {
+          _id: 0,
+          name: 1,
+          email: 1,
+          image: 1,
+          area: 1,
+          bio: 1
+        }
+      }
+    );
+
+    res.send({
+      ...service,
+      technician: technician || {
+        name: service.technicianName,
+        email: service.technicianEmail,
+        image: "",
+        area: "",
+        bio: ""
+      }
+    });
   } catch (error) {
     res.status(500).send({ message: "Failed to get service" });
   }
@@ -103,7 +127,9 @@ router.post("/", verifyToken, verifyTechnician, async (req, res) => {
       category,
       description,
       image,
+      images,
       basePrice,
+      estimatedDuration,
       serviceMode,
       serviceArea
     } = req.body;
@@ -112,30 +138,45 @@ router.post("/", verifyToken, verifyTechnician, async (req, res) => {
       title === undefined ||
       category === undefined ||
       description === undefined ||
-      image === undefined ||
       basePrice === undefined ||
       serviceMode === undefined
     ) {
-      return res.status(400).send({ message: "All required fields must be provided" });
+      return res.status(400).send({
+        message: "All required fields must be provided"
+      });
     }
+
+    const galleryImages = Array.isArray(images)
+      ? images
+      : typeof image === "string" && image.trim()
+        ? [image.trim()]
+        : [];
 
     if (
       typeof title !== "string" ||
       typeof category !== "string" ||
       typeof description !== "string" ||
-      typeof image !== "string" ||
       Number.isFinite(Number(basePrice)) === false ||
-      Number(basePrice) <= 0
+      Number(basePrice) <= 0 ||
+      galleryImages.length === 0 ||
+      galleryImages.length > 5 ||
+      galleryImages.some(
+        (item) => typeof item !== "string" || item.trim() === ""
+      )
     ) {
-      return res.status(400).send({ message: "Invalid service information" });
+      return res.status(400).send({
+        message: "Invalid service information"
+      });
     }
 
     const service = {
       title,
       category,
       description,
-      image,
+      image: galleryImages[0].trim(),
+      galleryImages: galleryImages.map((item) => item.trim()),
       basePrice: Number(basePrice),
+      estimatedDuration: estimatedDuration || "",
       serviceMode,
       serviceArea: serviceArea || "",
       technicianName: req.user.name,
@@ -164,7 +205,9 @@ router.patch("/:id", verifyToken, verifyTechnician, async (req, res) => {
       category,
       description,
       image,
+      images,
       basePrice,
+      estimatedDuration,
       serviceMode,
       serviceArea
     } = req.body;
@@ -183,8 +226,31 @@ router.patch("/:id", verifyToken, verifyTechnician, async (req, res) => {
       updateData.description = description;
     }
 
-    if (image !== undefined) {
-      updateData.image = image;
+    if (images !== undefined) {
+      if (
+        Array.isArray(images) === false ||
+        images.length === 0 ||
+        images.length > 5 ||
+        images.some(
+          (item) => typeof item !== "string" || item.trim() === ""
+        )
+      ) {
+        return res.status(400).send({
+          message: "Please provide between 1 and 5 valid images"
+        });
+      }
+
+      updateData.galleryImages = images.map((item) => item.trim());
+      updateData.image = images[0].trim();
+    } else if (image !== undefined) {
+      if (typeof image !== "string" || image.trim() === "") {
+        return res.status(400).send({
+          message: "Invalid service image"
+        });
+      }
+
+      updateData.image = image.trim();
+      updateData.galleryImages = [image.trim()];
     }
 
     if (basePrice !== undefined) {
@@ -196,6 +262,10 @@ router.patch("/:id", verifyToken, verifyTechnician, async (req, res) => {
       }
 
       updateData.basePrice = Number(basePrice);
+    }
+
+    if (estimatedDuration !== undefined) {
+      updateData.estimatedDuration = estimatedDuration;
     }
 
     if (serviceMode !== undefined) {

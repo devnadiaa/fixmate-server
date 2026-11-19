@@ -15,6 +15,7 @@ router.get("/", verifyToken, async (req, res) => {
           name: 1,
           email: 1,
           role: 1,
+          image: 1,
           phone: 1,
           area: 1,
           bio: 1
@@ -34,19 +35,27 @@ router.get("/", verifyToken, async (req, res) => {
 
 router.patch("/", verifyToken, async (req, res) => {
   try {
-    const { name, phone, area, bio } = req.body;
+    const { name, image, phone, area, bio } = req.body;
+
+    if (typeof name !== "string" || name.trim() === "") {
+      return res.status(400).send({ message: "Name is required" });
+    }
+
+    const updateData = {
+      name: name.trim(),
+      phone: typeof phone === "string" ? phone.trim() : "",
+      area: typeof area === "string" ? area.trim() : "",
+      bio: typeof bio === "string" ? bio.trim() : "",
+      updatedAt: new Date()
+    };
+
+    if (typeof image === "string") {
+      updateData.image = image.trim();
+    }
 
     const result = await usersCollection.updateOne(
       { email: req.user.email },
-      {
-        $set: {
-          name,
-          phone,
-          area,
-          bio,
-          updatedAt: new Date()
-        }
-      }
+      { $set: updateData }
     );
 
     if (result.matchedCount === 0) {
