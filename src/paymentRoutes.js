@@ -23,6 +23,8 @@ const updateBookingPaymentStatus = async (
   customerEmail,
   sessionId
 ) => {
+  const currentDate = new Date();
+
   const result = await bookingsCollection.updateOne(
     {
       _id: new ObjectId(bookingId),
@@ -33,7 +35,14 @@ const updateBookingPaymentStatus = async (
     {
       $set: {
         paymentStatus: "paid",
-        paidAt: new Date()
+        paidAt: currentDate
+      },
+      $push: {
+        statusHistory: {
+          status: "paid",
+          changedAt: currentDate,
+          note: "Payment completed successfully"
+        }
       }
     }
   );
