@@ -14,43 +14,58 @@ router.post("/", verifyToken, verifyCustomer, async (req, res) => {
   try {
     const {
       serviceId,
-      customerPhone,
+      phone,
+      customerPhone: submittedCustomerPhone,
       address,
       preferredDate,
       problemDescription
     } = req.body;
 
+    const customerPhone =
+      typeof phone === "string" ? phone.trim() : submittedCustomerPhone;
+
     if (
-      serviceId === undefined ||
-      customerPhone === undefined ||
-      address === undefined ||
-      preferredDate === undefined ||
-      problemDescription === undefined
+      typeof serviceId !== "string" ||
+      typeof customerPhone !== "string" ||
+      typeof address !== "string" ||
+      typeof preferredDate !== "string" ||
+      typeof problemDescription !== "string" ||
+      customerPhone.trim() === "" ||
+      address.trim() === "" ||
+      preferredDate.trim() === "" ||
+      problemDescription.trim() === ""
     ) {
-      return res.status(400).send({ message: "All fields are required" });
+      return res.status(400).send({
+        message: "All fields are required"
+      });
     }
 
     if (ObjectId.isValid(serviceId) === false) {
-      return res.status(400).send({ message: "Invalid service ID" });
+      return res.status(400).send({
+        message: "Invalid service ID"
+      });
     }
 
-    if (
-      typeof problemDescription !== "string" ||
-      problemDescription.trim().length < 20
-    ) {
+    if (problemDescription.trim().length < 20) {
       return res.status(400).send({
         message: "Problem description must be at least 20 characters"
       });
     }
 
-    const selectedDate = new Date(preferredDate);
+    const selectedDate = new Date(`${preferredDate}T00:00:00`);
+
+    const today = new Date();
+    const todayString = `${today.getFullYear()}-${String(
+      today.getMonth() + 1
+    ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
     if (
       Number.isNaN(selectedDate.getTime()) ||
-      selectedDate.setHours(0, 0, 0, 0) <
-        new Date().setHours(0, 0, 0, 0)
+      preferredDate < todayString
     ) {
-      return res.status(400).send({ message: "Invalid preferred date" });
+      return res.status(400).send({
+        message: "Invalid preferred date"
+      });
     }
 
     const service = await servicesCollection.findOne({
@@ -60,7 +75,9 @@ router.post("/", verifyToken, verifyCustomer, async (req, res) => {
     });
 
     if (service === null) {
-      return res.status(404).send({ message: "Service not found" });
+      return res.status(404).send({
+        message: "Service not found"
+      });
     }
 
     if (service.technicianEmail === req.user.email) {
@@ -72,7 +89,9 @@ router.post("/", verifyToken, verifyCustomer, async (req, res) => {
     const activeBooking = await bookingsCollection.findOne({
       serviceId,
       customerEmail: req.user.email,
-      status: { $in: ["requested", "accepted", "in-progress"] }
+      status: {
+        $in: ["requested", "accepted", "in-progress"]
+      }
     });
 
     if (activeBooking !== null) {
@@ -80,6 +99,8 @@ router.post("/", verifyToken, verifyCustomer, async (req, res) => {
         message: "You already have an active request for this service"
       });
     }
+
+    const currentDate = new Date();
 
     const booking = {
       serviceId,
@@ -91,49 +112,70 @@ router.post("/", verifyToken, verifyCustomer, async (req, res) => {
       technicianEmail: service.technicianEmail,
       customerName: req.user.name,
       customerEmail: req.user.email,
-      customerPhone,
-      address,
+      customerPhone: customerPhone.trim(),
+      address: address.trim(),
       preferredDate: selectedDate,
-      problemDescription,
+      problemDescription: problemDescription.trim(),
       status: "requested",
       statusHistory: [
         {
           status: "requested",
-          date: new Date(),
+          changedAt: currentDate,
           note: "Booking request submitted"
         }
       ],
       finalAmount: service.basePrice,
       paymentStatus: "unpaid",
-      createdAt: new Date()
+      createdAt: currentDate
     };
 
     const result = await bookingsCollection.insertOne(booking);
 
-    res.status(201).send(result);
+    res.status(201).send({
+      message: "Booking request submitted successfully",
+      bookingId: result.insertedId
+    });
   } catch (error) {
-    res.status(500).send({ message: "Failed to create booking" });
+    if (error.code === 11000) {
+      return res.status(409).send({
+        message: "You already have an active request for this service"
+      });
+    }
+
+    res.status(500).send({
+      message: "Failed to create booking"
+    });
   }
 });
 
 router.get("/my", verifyToken, verifyCustomer, async (req, res) => {
   try {
     const bookings = await bookingsCollection
-      .find({ customerEmail: req.user.email })
-      .sort({ createdAt: -1 })
+      .find({
+        customerEmail: req.user.email
+      })
+      .sort({
+        createdAt: -1
+      })
       .toArray();
 
     res.send(bookings);
   } catch (error) {
-    res.status(500).send({ message: "Failed to get bookings" });
+    res.status(500).send({
+      message: "Failed to get bookings"
+    });
   }
 });
 
 router.patch("/:id/cancel", verifyToken, verifyCustomer, async (req, res) => {
   try {
     if (ObjectId.isValid(req.params.id) === false) {
-      return res.status(404).send({ message: "Booking not found" });
+      return res.status(404).send({
+        message: "Booking not found"
+      });
     }
+
+    const currentDate = new Date();
 
     const result = await bookingsCollection.updateOne(
       {
@@ -144,12 +186,12 @@ router.patch("/:id/cancel", verifyToken, verifyCustomer, async (req, res) => {
       {
         $set: {
           status: "cancelled",
-          updatedAt: new Date()
+          updatedAt: currentDate
         },
         $push: {
           statusHistory: {
             status: "cancelled",
-            date: new Date(),
+            changedAt: currentDate,
             note: "Booking cancelled by customer"
           }
         }
@@ -162,29 +204,41 @@ router.patch("/:id/cancel", verifyToken, verifyCustomer, async (req, res) => {
       });
     }
 
-    res.send({ message: "Booking cancelled successfully" });
+    res.send({
+      message: "Booking cancelled successfully"
+    });
   } catch (error) {
-    res.status(500).send({ message: "Failed to cancel booking" });
+    res.status(500).send({
+      message: "Failed to cancel booking"
+    });
   }
 });
 
 router.get("/technician", verifyToken, verifyTechnician, async (req, res) => {
   try {
     const bookings = await bookingsCollection
-      .find({ technicianEmail: req.user.email })
-      .sort({ createdAt: -1 })
+      .find({
+        technicianEmail: req.user.email
+      })
+      .sort({
+        createdAt: -1
+      })
       .toArray();
 
     res.send(bookings);
   } catch (error) {
-    res.status(500).send({ message: "Failed to get requests" });
+    res.status(500).send({
+      message: "Failed to get requests"
+    });
   }
 });
 
 router.patch("/:id/status", verifyToken, verifyTechnician, async (req, res) => {
   try {
     if (ObjectId.isValid(req.params.id) === false) {
-      return res.status(404).send({ message: "Booking not found" });
+      return res.status(404).send({
+        message: "Booking not found"
+      });
     }
 
     const { status, finalAmount } = req.body;
@@ -195,7 +249,9 @@ router.patch("/:id/status", verifyToken, verifyTechnician, async (req, res) => {
     });
 
     if (booking === null) {
-      return res.status(404).send({ message: "Booking not found" });
+      return res.status(404).send({
+        message: "Booking not found"
+      });
     }
 
     const allowedStatuses = {
@@ -231,7 +287,9 @@ router.patch("/:id/status", verifyToken, verifyTechnician, async (req, res) => {
       updateData.finalAmount = Number(finalAmount);
     }
 
-    await bookingsCollection.updateOne(
+    const currentDate = new Date();
+
+    const result = await bookingsCollection.updateOne(
       {
         _id: new ObjectId(req.params.id),
         technicianEmail: req.user.email,
@@ -242,16 +300,26 @@ router.patch("/:id/status", verifyToken, verifyTechnician, async (req, res) => {
         $push: {
           statusHistory: {
             status,
-            date: new Date(),
+            changedAt: currentDate,
             note: `Booking status changed to ${status}`
           }
         }
       }
     );
 
-    res.send({ message: "Booking status updated successfully" });
+    if (result.matchedCount === 0) {
+      return res.status(409).send({
+        message: "Booking status has already changed. Please refresh."
+      });
+    }
+
+    res.send({
+      message: "Booking status updated successfully"
+    });
   } catch (error) {
-    res.status(500).send({ message: "Failed to update booking status" });
+    res.status(500).send({
+      message: "Failed to update booking status"
+    });
   }
 });
 

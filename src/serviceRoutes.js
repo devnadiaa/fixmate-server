@@ -3,11 +3,14 @@ import { ObjectId } from "mongodb";
 import { db } from "./auth.js";
 import verifyToken from "./middlewares/verifyToken.js";
 import verifyTechnician from "./middlewares/verifyTechnician.js";
+import verifyCustomer from "./middlewares/verifyCustomer.js";
 
 const router = express.Router();
 
 const servicesCollection = db.collection("services");
 const usersCollection = db.collection("users");
+const bookingsCollection = db.collection("bookings");
+const reviewsCollection = db.collection("reviews");
 
 router.get("/", async (req, res) => {
   try {
@@ -18,46 +21,51 @@ router.get("/", async (req, res) => {
 
     if (req.query.search) {
       query.$or = [
-        {
-          title: {
-            $regex: req.query.search,
-            $options: "i"
-          }
-        },
-        {
-          category: {
-            $regex: req.query.search,
-            $options: "i"
-          }
-        }
+        { title: { $regex: req.query.search, $options: "i" } },
+        { category: { $regex: req.query.search, $options: "i" } }
       ];
     }
 
-    if (req.query.category) {
-      query.category = req.query.category;
-    }
-
-    if (req.query.serviceMode) {
-      query.serviceMode = req.query.serviceMode;
-    }
+    if (req.query.category) query.category = req.query.category;
+    if (req.query.serviceMode) query.serviceMode = req.query.serviceMode;
 
     let sortOption = { createdAt: -1 };
 
-    if (req.query.sort === "price-low") {
-      sortOption = { basePrice: 1 };
-    }
-
-    if (req.query.sort === "price-high") {
-      sortOption = { basePrice: -1 };
-    }
+    if (req.query.sort === "price-low") sortOption = { basePrice: 1 };
+    if (req.query.sort === "price-high") sortOption = { basePrice: -1 };
 
     const services = await servicesCollection
       .find(query)
       .sort(sortOption)
       .toArray();
 
-    res.send(services);
-  } catch (error) {
+    const serviceIds = services.map(service => service._id.toString());
+
+    const ratings = await reviewsCollection.aggregate([
+      {
+        $match: {
+          serviceId: { $in: serviceIds }
+        }
+      },
+      {
+        $group: {
+          _id: "$serviceId",
+          averageRating: { $avg: "$rating" }
+        }
+      }
+    ]).toArray();
+
+    const ratingMap = new Map(
+      ratings.map(item => [item._id, item.averageRating])
+    );
+
+    const servicesWithRatings = services.map(service => ({
+      ...service,
+      averageRating: ratingMap.get(service._id.toString()) || 0
+    }));
+
+    res.send(servicesWithRatings);
+  } catch {
     res.status(500).send({ message: "Failed to get services" });
   }
 });
@@ -70,8 +78,79 @@ router.get("/my-services", verifyToken, verifyTechnician, async (req, res) => {
       .toArray();
 
     res.send(services);
-  } catch (error) {
+  } catch {
     res.status(500).send({ message: "Failed to get your services" });
+  }
+});
+
+router.post("/:id/reviews", verifyToken, verifyCustomer, async (req, res) => {
+  try {
+    const { bookingId, rating, comment } = req.body;
+
+    if (
+      ObjectId.isValid(req.params.id) === false ||
+      ObjectId.isValid(bookingId) === false
+    ) {
+      return res.status(400).send({ message: "Invalid service or booking ID" });
+    }
+
+    if (
+      Number.isInteger(rating) === false ||
+      rating < 1 ||
+      rating > 5 ||
+      typeof comment !== "string" ||
+      comment.trim() === ""
+    ) {
+      return res.status(400).send({
+        message: "Please provide a valid rating and review"
+      });
+    }
+
+    const service = await servicesCollection.findOne({
+      _id: new ObjectId(req.params.id),
+      approvalStatus: "approved",
+      isAvailable: true
+    });
+
+    if (service === null) {
+      return res.status(404).send({ message: "Service not found" });
+    }
+
+    const booking = await bookingsCollection.findOne({
+      _id: new ObjectId(bookingId),
+      serviceId: req.params.id,
+      customerEmail: req.user.email,
+      status: "completed",
+      paymentStatus: "paid"
+    });
+
+    if (booking === null) {
+      return res.status(403).send({
+        message: "Only customers with their own completed and paid booking can review this service"
+      });
+    }
+
+    const review = {
+      serviceId: req.params.id,
+      bookingId,
+      customerName: req.user.name,
+      customerEmail: req.user.email,
+      rating,
+      comment: comment.trim(),
+      createdAt: new Date()
+    };
+
+    const result = await reviewsCollection.insertOne(review);
+
+    res.status(201).send({
+      message: "Review submitted successfully",
+      review: {
+        ...review,
+        _id: result.insertedId
+      }
+    });
+  } catch {
+    res.status(500).send({ message: "Failed to submit review" });
   }
 });
 
@@ -105,6 +184,19 @@ router.get("/:id", async (req, res) => {
       }
     );
 
+    const reviews = await reviewsCollection
+      .find({ serviceId: req.params.id })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    const reviewCount = reviews.length;
+
+    const averageRating =
+      reviewCount > 0
+        ? reviews.reduce((total, review) => total + review.rating, 0) /
+          reviewCount
+        : 0;
+
     res.send({
       ...service,
       technician: technician || {
@@ -113,9 +205,12 @@ router.get("/:id", async (req, res) => {
         image: "",
         area: "",
         bio: ""
-      }
+      },
+      reviews,
+      reviewCount,
+      averageRating
     });
-  } catch (error) {
+  } catch {
     res.status(500).send({ message: "Failed to get service" });
   }
 });
@@ -161,7 +256,7 @@ router.post("/", verifyToken, verifyTechnician, async (req, res) => {
       galleryImages.length === 0 ||
       galleryImages.length > 5 ||
       galleryImages.some(
-        (item) => typeof item !== "string" || item.trim() === ""
+        item => typeof item !== "string" || item.trim() === ""
       )
     ) {
       return res.status(400).send({
@@ -174,7 +269,7 @@ router.post("/", verifyToken, verifyTechnician, async (req, res) => {
       category,
       description,
       image: galleryImages[0].trim(),
-      galleryImages: galleryImages.map((item) => item.trim()),
+      galleryImages: galleryImages.map(item => item.trim()),
       basePrice: Number(basePrice),
       estimatedDuration: estimatedDuration || "",
       serviceMode,
@@ -189,8 +284,53 @@ router.post("/", verifyToken, verifyTechnician, async (req, res) => {
     const result = await servicesCollection.insertOne(service);
 
     res.status(201).send(result);
-  } catch (error) {
+  } catch {
     res.status(500).send({ message: "Failed to add service" });
+  }
+});
+
+router.patch("/:id/availability", verifyToken, verifyTechnician, async (req, res) => {
+  try {
+    if (ObjectId.isValid(req.params.id) === false) {
+      return res.status(404).send({ message: "Service not found" });
+    }
+
+    const { isAvailable } = req.body;
+
+    if (typeof isAvailable !== "boolean") {
+      return res.status(400).send({
+        message: "Please provide a valid availability status"
+      });
+    }
+
+    const result = await servicesCollection.updateOne(
+      {
+        _id: new ObjectId(req.params.id),
+        technicianEmail: req.user.email,
+        approvalStatus: "approved"
+      },
+      {
+        $set: {
+          isAvailable,
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        message: "Approved service not found"
+      });
+    }
+
+    res.send({
+      message: "Service availability updated successfully",
+      isAvailable
+    });
+  } catch {
+    res.status(500).send({
+      message: "Failed to update service availability"
+    });
   }
 });
 
@@ -214,17 +354,9 @@ router.patch("/:id", verifyToken, verifyTechnician, async (req, res) => {
 
     const updateData = {};
 
-    if (title !== undefined) {
-      updateData.title = title;
-    }
-
-    if (category !== undefined) {
-      updateData.category = category;
-    }
-
-    if (description !== undefined) {
-      updateData.description = description;
-    }
+    if (title !== undefined) updateData.title = title;
+    if (category !== undefined) updateData.category = category;
+    if (description !== undefined) updateData.description = description;
 
     if (images !== undefined) {
       if (
@@ -232,7 +364,7 @@ router.patch("/:id", verifyToken, verifyTechnician, async (req, res) => {
         images.length === 0 ||
         images.length > 5 ||
         images.some(
-          (item) => typeof item !== "string" || item.trim() === ""
+          item => typeof item !== "string" || item.trim() === ""
         )
       ) {
         return res.status(400).send({
@@ -240,13 +372,11 @@ router.patch("/:id", verifyToken, verifyTechnician, async (req, res) => {
         });
       }
 
-      updateData.galleryImages = images.map((item) => item.trim());
+      updateData.galleryImages = images.map(item => item.trim());
       updateData.image = images[0].trim();
     } else if (image !== undefined) {
       if (typeof image !== "string" || image.trim() === "") {
-        return res.status(400).send({
-          message: "Invalid service image"
-        });
+        return res.status(400).send({ message: "Invalid service image" });
       }
 
       updateData.image = image.trim();
@@ -268,13 +398,8 @@ router.patch("/:id", verifyToken, verifyTechnician, async (req, res) => {
       updateData.estimatedDuration = estimatedDuration;
     }
 
-    if (serviceMode !== undefined) {
-      updateData.serviceMode = serviceMode;
-    }
-
-    if (serviceArea !== undefined) {
-      updateData.serviceArea = serviceArea;
-    }
+    if (serviceMode !== undefined) updateData.serviceMode = serviceMode;
+    if (serviceArea !== undefined) updateData.serviceArea = serviceArea;
 
     if (Object.keys(updateData).length === 0) {
       return res.status(400).send({ message: "No information to update" });
@@ -288,9 +413,7 @@ router.patch("/:id", verifyToken, verifyTechnician, async (req, res) => {
         _id: new ObjectId(req.params.id),
         technicianEmail: req.user.email
       },
-      {
-        $set: updateData
-      }
+      { $set: updateData }
     );
 
     if (result.matchedCount === 0) {
@@ -298,7 +421,7 @@ router.patch("/:id", verifyToken, verifyTechnician, async (req, res) => {
     }
 
     res.send({ message: "Service updated successfully" });
-  } catch (error) {
+  } catch {
     res.status(500).send({ message: "Failed to update service" });
   }
 });
@@ -319,7 +442,7 @@ router.delete("/:id", verifyToken, verifyTechnician, async (req, res) => {
     }
 
     res.send({ message: "Service deleted successfully" });
-  } catch (error) {
+  } catch {
     res.status(500).send({ message: "Failed to delete service" });
   }
 });

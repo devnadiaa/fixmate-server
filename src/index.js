@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { toNodeHandler } from "better-auth/node";
-import { auth, client } from "./auth.js";
+import { auth, client, db } from "./auth.js";
 import verifyToken from "./middlewares/verifyToken.js";
 import verifyCustomer from "./middlewares/verifyCustomer.js";
 import verifyTechnician from "./middlewares/verifyTechnician.js";
@@ -26,7 +26,15 @@ app.use(
 
 app.all("/api/auth/{*any}", toNodeHandler(auth));
 
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req, res, buffer) => {
+      if (req.originalUrl === "/api/payments/webhook") {
+        req.rawBody = buffer;
+      }
+    }
+  })
+);
 
 app.get("/", (req, res) => {
   res.send("FixMate Server is Running");
@@ -56,13 +64,53 @@ async function run() {
 
     console.log("MongoDB Connected Successfully");
 
+    await db.collection("bookings").createIndex(
+      {
+        serviceId: 1,
+        customerEmail: 1
+      },
+      {
+        unique: true,
+        name: "unique_active_booking_per_customer_service",
+        partialFilterExpression: {
+          status: {
+            $in: ["requested", "accepted", "in-progress"]
+          }
+        }
+      }
+    );
+
+    await db.collection("payments").createIndex(
+      { bookingId: 1 },
+      {
+        unique: true,
+        name: "unique_payment_per_booking",
+        partialFilterExpression: {
+          bookingId: { $type: "string" }
+        }
+      }
+    );
+
+    await db.collection("payments").createIndex(
+      { stripeSessionId: 1 },
+      {
+        unique: true,
+        name: "unique_stripe_session_id_payment",
+        partialFilterExpression: {
+          stripeSessionId: { $type: "string" }
+        }
+      }
+    );
+
+    console.log("Database Indexes Created Successfully");
+
     const port = process.env.PORT || 5000;
 
     app.listen(port, () => {
       console.log(`FixMate Server running on port ${port}`);
     });
   } catch (error) {
-    console.log("MongoDB Connection Failed");
+    console.error("Server Startup Failed:", error);
   }
 }
 

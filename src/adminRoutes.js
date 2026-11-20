@@ -31,6 +31,12 @@ router.get("/users", verifyToken, verifyAdmin, async (req, res) => {
 
 router.patch("/users/:email/role", verifyToken, verifyAdmin, async (req, res) => {
   try {
+    if (req.user.email === req.params.email) {
+      return res.status(403).send({
+        message: "You cannot change your own role"
+      });
+    }
+
     const { role } = req.body;
 
     if (

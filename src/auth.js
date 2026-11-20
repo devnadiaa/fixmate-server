@@ -65,6 +65,17 @@ const auth = betterAuth({
           };
         },
       },
+      update: {
+        before: async (userData) => {
+          const safeUserData = { ...userData };
+
+          delete safeUserData.role;
+
+          return {
+            data: safeUserData,
+          };
+        },
+      },
     },
   },
 
