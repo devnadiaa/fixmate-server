@@ -207,6 +207,107 @@ const completePayment = async (session, customerEmail) => {
   return "Payment successful";
 };
 
+router.get(
+  "/my",
+  verifyToken,
+  verifyCustomer,
+  async (req, res) => {
+    try {
+      const payments = await paymentsCollection
+        .find({
+          customerEmail: req.user.email
+        })
+        .sort({
+          paidAt: -1
+        })
+        .toArray();
+
+      const updatedPayments = await Promise.all(
+        payments.map(async (payment) => {
+          const updateData = {};
+
+          const bookingId = payment.bookingId;
+
+          if (ObjectId.isValid(bookingId)) {
+            const booking = await bookingsCollection.findOne({
+              _id: new ObjectId(bookingId),
+              customerEmail: req.user.email
+            });
+
+            if (booking !== null) {
+              updateData.serviceTitle =
+                payment.serviceTitle || booking.serviceTitle;
+
+              updateData.customerName =
+                payment.customerName || booking.customerName;
+
+              updateData.technicianName =
+                payment.technicianName || booking.technicianName;
+
+              updateData.technicianEmail =
+                payment.technicianEmail || booking.technicianEmail;
+            }
+          }
+
+          const sessionId =
+            payment.stripeSessionId || payment.sessionId;
+
+          if (payment.transactionId === undefined && sessionId) {
+            try {
+              const session =
+                await stripe.checkout.sessions.retrieve(
+                  sessionId,
+                  {
+                    expand: ["payment_intent"]
+                  }
+                );
+
+              const transactionId =
+                typeof session.payment_intent === "string"
+                  ? session.payment_intent
+                  : session.payment_intent?.id;
+
+              if (transactionId) {
+                updateData.transactionId = transactionId;
+              }
+            } catch (error) {
+              console.error(
+                "Stripe Transaction Retrieval Error:",
+                error.message
+              );
+            }
+          }
+
+          if (Object.keys(updateData).length > 0) {
+            await paymentsCollection.updateOne(
+              {
+                _id: payment._id,
+                customerEmail: req.user.email
+              },
+              {
+                $set: updateData
+              }
+            );
+          }
+
+          return {
+            ...payment,
+            ...updateData
+          };
+        })
+      );
+
+      res.send(updatedPayments);
+    } catch (error) {
+      console.error("Payment History Error:", error);
+
+      res.status(500).send({
+        message: "Failed to get payment history"
+      });
+    }
+  }
+);
+
 router.post("/webhook", async (req, res) => {
   let event;
 

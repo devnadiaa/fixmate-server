@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { betterAuth } from "better-auth";
+import { getOAuthState } from "better-auth/api";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
 import { jwt } from "better-auth/plugins";
 import { MongoClient } from "mongodb";
@@ -22,6 +23,13 @@ const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     autoSignIn: false,
+  },
+
+  socialProviders: {
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    },
   },
 
   user: {
@@ -51,10 +59,18 @@ const auth = betterAuth({
   databaseHooks: {
     user: {
       create: {
-        before: async (user) => {
+        before: async (user, ctx) => {
+          let requestedRole = user.role;
+
+          if (ctx.path === "/callback/:id") {
+            const oauthData = await getOAuthState();
+
+            requestedRole = oauthData?.role;
+          }
+
           const role =
-            user.role === "technician" || user.role === "customer"
-              ? user.role
+            requestedRole === "technician" || requestedRole === "customer"
+              ? requestedRole
               : "customer";
 
           return {
@@ -65,6 +81,7 @@ const auth = betterAuth({
           };
         },
       },
+
       update: {
         before: async (userData) => {
           const safeUserData = { ...userData };
