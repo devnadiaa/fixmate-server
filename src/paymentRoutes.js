@@ -336,8 +336,8 @@ router.post(
             bookingId: booking._id.toString(),
             customerEmail: req.user.email
           },
-          success_url: `${process.env.CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${process.env.CLIENT_URL}/my-bookings`
+          success_url: `${process.env.CLIENT_URL}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${process.env.CLIENT_URL}/payment/cancel`
         },
         {
           idempotencyKey: `fixmate-booking-${booking._id}`
