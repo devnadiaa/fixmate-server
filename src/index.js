@@ -19,8 +19,12 @@ const app = express();
 
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:3000",
-    credentials: true
+    origin: [
+      "http://localhost:3000",
+      "https://fixmate-client-wheat.vercel.app",
+      process.env.CLIENT_URL,
+    ].filter(Boolean),
+    credentials: true,
   })
 );
 
@@ -32,7 +36,7 @@ app.use(
       if (req.originalUrl === "/api/payments/webhook") {
         req.rawBody = buffer;
       }
-    }
+    },
   })
 );
 
@@ -67,16 +71,16 @@ async function run() {
     await db.collection("bookings").createIndex(
       {
         serviceId: 1,
-        customerEmail: 1
+        customerEmail: 1,
       },
       {
         unique: true,
         name: "unique_active_booking_per_customer_service",
         partialFilterExpression: {
           status: {
-            $in: ["requested", "accepted", "in-progress"]
-          }
-        }
+            $in: ["requested", "accepted", "in-progress"],
+          },
+        },
       }
     );
 
@@ -86,8 +90,8 @@ async function run() {
         unique: true,
         name: "unique_payment_per_booking",
         partialFilterExpression: {
-          bookingId: { $type: "string" }
-        }
+          bookingId: { $type: "string" },
+        },
       }
     );
 
@@ -97,8 +101,8 @@ async function run() {
         unique: true,
         name: "unique_stripe_session_id_payment",
         partialFilterExpression: {
-          stripeSessionId: { $type: "string" }
-        }
+          stripeSessionId: { $type: "string" },
+        },
       }
     );
 

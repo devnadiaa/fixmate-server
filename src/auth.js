@@ -17,8 +17,10 @@ const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL,
 
   trustedOrigins: [
-    process.env.CLIENT_URL || "http://localhost:3000",
-  ],
+    "http://localhost:3000",
+    "https://fixmate-client-wheat.vercel.app",
+    process.env.CLIENT_URL,
+  ].filter(Boolean),
 
   emailAndPassword: {
     enabled: true,
