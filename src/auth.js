@@ -22,6 +22,14 @@ const auth = betterAuth({
     process.env.CLIENT_URL,
   ].filter(Boolean),
 
+  advanced: {
+    defaultCookieAttributes: {
+      sameSite: "none",
+      secure: true,
+      httpOnly: true,
+    },
+  },
+
   emailAndPassword: {
     enabled: true,
     autoSignIn: false,
