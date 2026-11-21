@@ -34,26 +34,65 @@ router.get("/", async (req, res) => {
     if (req.query.sort === "price-low") sortOption = { basePrice: 1 };
     if (req.query.sort === "price-high") sortOption = { basePrice: -1 };
 
-    const services = await servicesCollection
+    const paginationEnabled =
+      req.query.page !== undefined || req.query.limit !== undefined;
+
+    const totalServices = await servicesCollection.countDocuments(query);
+
+    let servicesQuery = servicesCollection
       .find(query)
-      .sort(sortOption)
-      .toArray();
+      .sort(sortOption);
+
+    let currentPage = 1;
+    let limit = totalServices || 1;
+    let totalPages = 1;
+
+    if (paginationEnabled) {
+      currentPage = Number(req.query.page || 1);
+      limit = Number(req.query.limit || 6);
+
+      if (
+        Number.isInteger(currentPage) === false ||
+        currentPage < 1 ||
+        Number.isInteger(limit) === false ||
+        limit < 1 ||
+        limit > 50
+      ) {
+        return res.status(400).send({
+          message: "Invalid pagination parameters"
+        });
+      }
+
+      totalPages = Math.ceil(totalServices / limit);
+
+      if (totalPages > 0 && currentPage > totalPages) {
+        currentPage = totalPages;
+      }
+
+      servicesQuery = servicesQuery
+        .skip((currentPage - 1) * limit)
+        .limit(limit);
+    }
+
+    const services = await servicesQuery.toArray();
 
     const serviceIds = services.map(service => service._id.toString());
 
-    const ratings = await reviewsCollection.aggregate([
-      {
-        $match: {
-          serviceId: { $in: serviceIds }
-        }
-      },
-      {
-        $group: {
-          _id: "$serviceId",
-          averageRating: { $avg: "$rating" }
-        }
-      }
-    ]).toArray();
+    const ratings = serviceIds.length > 0
+      ? await reviewsCollection.aggregate([
+          {
+            $match: {
+              serviceId: { $in: serviceIds }
+            }
+          },
+          {
+            $group: {
+              _id: "$serviceId",
+              averageRating: { $avg: "$rating" }
+            }
+          }
+        ]).toArray()
+      : [];
 
     const ratingMap = new Map(
       ratings.map(item => [item._id, item.averageRating])
@@ -63,6 +102,16 @@ router.get("/", async (req, res) => {
       ...service,
       averageRating: ratingMap.get(service._id.toString()) || 0
     }));
+
+    if (paginationEnabled) {
+      return res.send({
+        services: servicesWithRatings,
+        totalServices,
+        totalPages,
+        currentPage,
+        limit
+      });
+    }
 
     res.send(servicesWithRatings);
   } catch {
