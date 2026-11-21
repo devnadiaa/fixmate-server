@@ -1,6 +1,7 @@
 import express from "express";
 import Stripe from "stripe";
 import { ObjectId } from "mongodb";
+import { createHash } from "node:crypto";
 import { db } from "./auth.js";
 import verifyToken from "./middlewares/verifyToken.js";
 import verifyCustomer from "./middlewares/verifyCustomer.js";
@@ -418,30 +419,36 @@ router.post(
         });
       }
 
-      const session = await stripe.checkout.sessions.create(
-        {
-          mode: "payment",
-          line_items: [
-            {
-              price_data: {
-                currency: "usd",
-                product_data: {
-                  name: booking.serviceTitle
-                },
-                unit_amount: Math.round(finalAmount * 100)
+      const checkoutSessionData = {
+        mode: "payment",
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: booking.serviceTitle
               },
-              quantity: 1
-            }
-          ],
-          metadata: {
-            bookingId: booking._id.toString(),
-            customerEmail: req.user.email
-          },
-          success_url: `${process.env.CLIENT_URL}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${process.env.CLIENT_URL}/payment/cancel`
+              unit_amount: Math.round(finalAmount * 100)
+            },
+            quantity: 1
+          }
+        ],
+        metadata: {
+          bookingId: booking._id.toString(),
+          customerEmail: req.user.email
         },
+        success_url: `${process.env.CLIENT_URL}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.CLIENT_URL}/payment/cancel`
+      };
+
+      const paramsHash = createHash("sha256")
+        .update(JSON.stringify(checkoutSessionData))
+        .digest("hex");
+
+      const session = await stripe.checkout.sessions.create(
+        checkoutSessionData,
         {
-          idempotencyKey: `fixmate-booking-${booking._id}`
+          idempotencyKey: `fixmate-booking-${booking._id}-${paramsHash}`
         }
       );
 
