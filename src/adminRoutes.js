@@ -1,4 +1,5 @@
 import express from "express";
+import Stripe from "stripe";
 import { ObjectId } from "mongodb";
 import { db } from "./auth.js";
 import verifyToken from "./middlewares/verifyToken.js";
@@ -10,6 +11,10 @@ const usersCollection = db.collection("users");
 const servicesCollection = db.collection("services");
 const bookingsCollection = db.collection("bookings");
 const paymentsCollection = db.collection("payments");
+
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? new Stripe(process.env.STRIPE_SECRET_KEY)
+  : null;
 
 router.get("/users", verifyToken, verifyAdmin, async (req, res) => {
   try {
@@ -122,10 +127,61 @@ router.get("/payments", verifyToken, verifyAdmin, async (req, res) => {
   try {
     const payments = await paymentsCollection
       .find({})
-      .sort({ createdAt: -1 })
+      .sort({ paidAt: -1, createdAt: -1 })
       .toArray();
 
-    res.send(payments);
+    const updatedPayments = await Promise.all(
+      payments.map(async (payment) => {
+        const updateData = {};
+
+        const sessionId =
+          payment.stripeSessionId || payment.sessionId;
+
+        if (
+          stripe &&
+          sessionId &&
+          (!payment.transactionId || !payment.paidAt)
+        ) {
+          try {
+            const session = await stripe.checkout.sessions.retrieve(
+              sessionId,
+              {
+                expand: ["payment_intent"]
+              }
+            );
+
+            const transactionId =
+              typeof session.payment_intent === "string"
+                ? session.payment_intent
+                : session.payment_intent?.id;
+
+            if (!payment.transactionId && transactionId) {
+              updateData.transactionId = transactionId;
+            }
+
+            if (!payment.paidAt && session.created) {
+              updateData.paidAt = new Date(session.created * 1000);
+            }
+
+            if (Object.keys(updateData).length > 0) {
+              await paymentsCollection.updateOne(
+                { _id: payment._id },
+                { $set: updateData }
+              );
+            }
+          } catch (error) {
+            // Keep the payment record available if Stripe lookup fails.
+          }
+        }
+
+        return {
+          ...payment,
+          ...updateData
+        };
+      })
+    );
+
+    res.send(updatedPayments);
   } catch (error) {
     res.status(500).send({ message: "Failed to get payments" });
   }
